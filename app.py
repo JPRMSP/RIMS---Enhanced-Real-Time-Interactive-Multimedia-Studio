@@ -1,75 +1,75 @@
 import streamlit as st
 from PIL import Image, ImageDraw
 import numpy as np
-from pydub import AudioSegment
-from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, VideoProcessorBase
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase
 import av
 import json
-import io
 import base64
 
-st.set_page_config(page_title="Real-Time Interactive Multimedia Studio", layout="wide")
+st.set_page_config(page_title="RIMS Multimedia Studio", layout="wide")
 
 st.title("🎨 Real-Time Interactive Multimedia Studio (RIMS)")
-st.write("A modern Flash-inspired Web Multimedia Studio built with Streamlit.")
 
+# -------------------------------------------------------
+# Session State Init
+# -------------------------------------------------------
 if "frames" not in st.session_state:
     st.session_state.frames = []
 if "current_color" not in st.session_state:
     st.session_state.current_color = "#000000"
+if "cues" not in st.session_state:
+    st.session_state.cues = []
 
-tabs = st.tabs(["Drawing Studio", "Animation Timeline", "Camera & Mic", "Color Tools",
-                "Video + Cue Points", "Export/Import"])
+tabs = st.tabs([
+    "Drawing Studio", "Animation Timeline", "Camera Stream",
+    "Audio Recording", "Color Tools", "Video + Cue Points",
+    "Export / Import"
+])
 
-# -------------------------------------------------------------
+# -------------------------------------------------------
 # DRAWING STUDIO
-# -------------------------------------------------------------
+# -------------------------------------------------------
 with tabs[0]:
     st.header("✏️ Drawing Studio")
+
     col1, col2 = st.columns([3, 1])
 
     with col2:
         color = st.color_picker("Color", value=st.session_state.current_color)
         st.session_state.current_color = color
-        size = st.slider("Brush Size", 1, 50, 5)
+        brush = st.slider("Brush Size", 1, 50, 5)
 
     with col1:
-        canvas_width = 600
-        canvas_height = 400
-        canvas = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8) + 255
-        st.write("Draw on the canvas below (experimental):")
-        img_file = st.camera_input("Use camera snapshot as background (optional)", key="bg")
-        if img_file:
-            bg_img = Image.open(img_file).resize((canvas_width, canvas_height))
-            canvas = np.array(bg_img)
+        canvas_width, canvas_height = 600, 400
+        canvas = np.ones((canvas_height, canvas_width, 3), dtype=np.uint8)*255
 
-        draw_image = st.image(canvas, use_column_width=True)
-        if st.button("Save Frame"):
+        st.write("Canvas (static demo):")
+        st.image(canvas)
+
+        if st.button("Save Blank Frame"):
             st.session_state.frames.append(canvas.tolist())
             st.success("Frame saved!")
 
-# -------------------------------------------------------------
+# -------------------------------------------------------
 # ANIMATION TIMELINE
-# -------------------------------------------------------------
+# -------------------------------------------------------
 with tabs[1]:
     st.header("🎞️ Animation Timeline")
-    
     if st.session_state.frames:
         idx = st.slider("Select frame", 0, len(st.session_state.frames)-1, 0)
-        st.image(np.array(st.session_state.frames[idx]), caption=f"Frame {idx}")
-        
+        st.image(np.array(st.session_state.frames[idx]))
+
         if st.button("Play Animation"):
             for f in st.session_state.frames:
                 st.image(np.array(f))
     else:
-        st.info("No frames added yet.")
+        st.info("No frames saved yet.")
 
-# -------------------------------------------------------------
-# CAMERA & MIC
-# -------------------------------------------------------------
+# -------------------------------------------------------
+# CAMERA STREAM
+# -------------------------------------------------------
 with tabs[2]:
-    st.header("📹 Camera & 🎤 Microphone")
-    st.write("Live webcam stream:")
+    st.header("📹 Camera Stream")
 
     class VideoProcessor(VideoProcessorBase):
         def recv(self, frame):
@@ -78,73 +78,95 @@ with tabs[2]:
 
     webrtc_streamer(key="camera", video_processor_factory=VideoProcessor)
 
-# -------------------------------------------------------------
-# COLOR TOOLS
-# -------------------------------------------------------------
+# -------------------------------------------------------
+# AUDIO RECORDING (Browser-based)
+# -------------------------------------------------------
 with tabs[3]:
-    st.header("🎨 Color Theory Tools")
-    color = st.color_picker("Pick a color")
+    st.header("🎤 Audio Recorder")
 
-    def rgb_to_gray(rgb):
-        return int(0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2])
+    class AudioProcessor(AudioProcessorBase):
+        def __init__(self):
+            self.frames = []
 
-    rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
-    gray = rgb_to_gray(rgb)
+        def recv_audio(self, frame):
+            self.frames.append(frame)
+            return frame
 
-    st.write("**Grayscale Equivalent:**", gray)
+    ctx = webrtc_streamer(
+        key="audio", mode="sendonly", audio_processor_factory=AudioProcessor,
+        media_stream_constraints={"audio": True, "video": False}
+    )
 
-    st.write("**Web Safe Colors:**")
-    websafe = [0, 51, 102, 153, 204, 255]
+    if ctx and ctx.audio_processor:
+        if st.button("Save Recorded Audio"):
+            frames = ctx.audio_processor.frames
+            wav_bytes = b"".join([f.to_ndarray().tobytes() for f in frames])
+
+            b64 = base64.b64encode(wav_bytes).decode()
+            href = f"<a href='data:audio/wav;base64,{b64}' download='audio.wav'>Download audio.wav</a>"
+            st.markdown(href, unsafe_allow_html=True)
+
+# -------------------------------------------------------
+# COLOR TOOLS
+# -------------------------------------------------------
+with tabs[4]:
+    st.header("🎨 Color Tools")
+
+    color = st.color_picker("Pick Color")
+    r, g, b = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
+    gray = int(0.299*r + 0.587*g + 0.114*b)
+
+    st.write("Grayscale value:", gray)
+
+    ws = [0, 51, 102, 153, 204, 255]
     palette = Image.new("RGB", (180, 180))
     draw = ImageDraw.Draw(palette)
     pos = 0
-    for r in websafe:
-        for g in websafe:
-            for b in websafe:
-                draw.rectangle([pos, 0, pos+5, 5], fill=(r,g,b))
+    for R in ws:
+        for G in ws:
+            for B in ws:
+                draw.rectangle([pos, 0, pos+5, 5], fill=(R,G,B))
                 pos += 6
     st.image(palette)
 
-# -------------------------------------------------------------
+# -------------------------------------------------------
 # VIDEO + CUE POINTS
-# -------------------------------------------------------------
-with tabs[4]:
-    st.header("🎥 Video Playback with Cue Points")
-    vid = st.file_uploader("Upload a video", type=["mp4", "mov"])
-    cue_time = st.number_input("Add Cue Time (sec)", min_value=0)
-    cue_action = st.text_input("Cue Action")
+# -------------------------------------------------------
+with tabs[5]:
+    st.header("🎥 Video + Cue Points")
 
-    if "cues" not in st.session_state:
-        st.session_state.cues = []
+    vid = st.file_uploader("Upload video", type=["mp4", "mov", "avi"])
+    time = st.number_input("Cue time (sec)", min_value=0)
+    action = st.text_input("Cue action")
 
-    if st.button("Add Cue Point"):
-        st.session_state.cues.append({"time": cue_time, "action": cue_action})
+    if st.button("Add Cue"):
+        st.session_state.cues.append({"time": time, "action": action})
         st.success("Cue added!")
 
-    st.write("Current Cue Points:", st.session_state.cues)
+    st.write(st.session_state.cues)
 
     if vid:
         st.video(vid)
 
-# -------------------------------------------------------------
+# -------------------------------------------------------
 # EXPORT / IMPORT
-# -------------------------------------------------------------
-with tabs[5]:
+# -------------------------------------------------------
+with tabs[6]:
     st.header("📦 Export / Import Project")
 
     project = {
         "frames": st.session_state.frames,
-        "cues": st.session_state.get("cues", []),
+        "cues": st.session_state.cues
     }
 
-    json_data = json.dumps(project).encode()
-    b64 = base64.b64encode(json_data).decode()
-    href = f"<a href='data:file/json;base64,{b64}' download='project.json'>Download Project JSON</a>"
+    data = json.dumps(project).encode()
+    b64 = base64.b64encode(data).decode()
+    href = f"<a href='data:file/json;base64,{b64}' download='project.json'>Download project.json</a>"
     st.markdown(href, unsafe_allow_html=True)
 
-    uploaded = st.file_uploader("Import Project JSON", type=["json"])
+    uploaded = st.file_uploader("Import project", type=["json"])
     if uploaded:
-        data = json.load(uploaded)
-        st.session_state.frames = data["frames"]
-        st.session_state.cues = data["cues"]
-        st.success("Project loaded successfully!")
+        obj = json.load(uploaded)
+        st.session_state.frames = obj["frames"]
+        st.session_state.cues = obj["cues"]
+        st.success("Project imported!")
