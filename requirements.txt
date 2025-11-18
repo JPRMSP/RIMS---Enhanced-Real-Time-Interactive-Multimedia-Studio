@@ -1,6 +1,5 @@
 streamlit
 Pillow
-pydub
 numpy
 opencv-python-headless
 streamlit-webrtc
