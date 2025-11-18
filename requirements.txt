@@ -1,7 +1,6 @@
 streamlit
 Pillow
+pydub
 numpy
 opencv-python-headless
-streamlit-drawable-canvas
-pydub
 streamlit-webrtc
